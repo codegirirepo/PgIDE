@@ -1,0 +1,19 @@
+{
+  "name": "pgide-desktop",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.pgide.app",
+    "productName": "PgIDE",
+    "files": ["main.js", "../backend/dist/**/*", "../frontend/dist/**/*"],
+    "directories": { "output": "../release" }
+  }
+}

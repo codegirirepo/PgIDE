@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import * as adv from '../services/advancedService.js';
+import { analyzePlan } from '../services/planAnalyzer.js';
+import { comparePlans } from '../services/planComparator.js';
 
 const router = Router();
 
@@ -88,10 +90,34 @@ router.delete('/plan-history', async (_req: Request, res: Response) => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// Plan analysis (15 rules)
+router.post('/analyze-plan', async (req: Request, res: Response) => {
+  try {
+    const { plan } = req.body;
+    res.json(analyzePlan(plan));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Plan comparison (per-node diff)
+router.post('/compare-plans', async (req: Request, res: Response) => {
+  try {
+    const { oldPlan, newPlan, threshold } = req.body;
+    res.json(comparePlans(oldPlan, newPlan, threshold));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // Primary key columns (for row editing)
 router.get('/pk/:connId/:schema/:table', async (req: Request, res: Response) => {
   try {
     res.json(await adv.getPrimaryKeyColumns(req.params.connId, req.params.schema, req.params.table));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// VACUUM table
+router.post('/vacuum', async (req: Request, res: Response) => {
+  try {
+    const { connectionId, schema, table } = req.body;
+    res.json(await adv.vacuumTable(connectionId, schema, table));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

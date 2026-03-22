@@ -53,6 +53,15 @@ router.get('/:connId/schemas/:schema/functions/:func/definition', async (req: Re
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+router.get('/:connId/schemas/:schema/functions/:func/parameters', async (req: Request, res: Response) => {
+  try {
+    const args = (req.query.args as string) || '';
+    const result = await meta.getFunctionParameters(req.params.connId, req.params.schema, req.params.func, args);
+    res.json(result);
+  }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.get('/:connId/autocomplete', async (req: Request, res: Response) => {
   try { res.json(await meta.getAutocompleteSuggestions(req.params.connId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }

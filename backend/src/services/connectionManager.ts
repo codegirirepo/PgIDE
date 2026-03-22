@@ -139,3 +139,15 @@ export function unregisterRunningQuery(queryId: string): void {
 export function isConnected(id: string): boolean {
   return activePools.has(id);
 }
+
+export function getConnectionConfig(id: string): { host: string; port: number; database: string; user: string; password: string } | null {
+  const stored = savedConnections.get(id);
+  if (!stored) return null;
+  return {
+    host: stored.host,
+    port: stored.port,
+    database: stored.database,
+    user: stored.user,
+    password: decrypt(stored.encryptedPassword),
+  };
+}

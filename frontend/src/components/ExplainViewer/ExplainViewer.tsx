@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react';
 import { api } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
-import type { ExplainNode, PlanHistoryEntry } from '@/types';
-import { Play, Loader2, AlertTriangle, Zap, Clock, Database, ArrowRight, Settings, History, GitCompare, Trash2, Save } from 'lucide-react';
+import type { ExplainNode, PlanHistoryEntry, PlanAnalysisResult, PlanFinding, PlanComparisonResult, PlanNodeDelta } from '@/types';
+import { Play, Loader2, AlertTriangle, Zap, Clock, Database, ArrowRight, Settings, History, GitCompare, Trash2, Save, Search, ChevronDown, ChevronRight } from 'lucide-react';
 
 // Feature 6: Parameter presets
 const PARAM_PRESETS: { label: string; key: string; default: string; hint: string }[] = [
@@ -162,7 +162,83 @@ function PlanNode({ node, maxTime, depth = 0, criticalPath }: { node: ExplainNod
   );
 }
 
-type ViewMode = 'plan' | 'settings' | 'history' | 'compare';
+type ViewMode = 'plan' | 'findings' | 'settings' | 'history' | 'compare';
+
+const severityColor: Record<string, string> = {
+  critical: 'bg-red-500/10 text-red-500 border-red-500/30',
+  warning: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30',
+  info: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
+};
+const severityIcon: Record<string, string> = { critical: '🔴', warning: '🟡', info: '🔵' };
+
+function FindingsPanel({ findings }: { findings: PlanFinding[] }) {
+  if (!findings.length) return <div className="text-sm text-muted-foreground py-6 text-center">No issues found — plan looks good!</div>;
+  const counts = { critical: 0, warning: 0, info: 0 };
+  findings.forEach(f => counts[f.severity]++);
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-3 text-xs mb-3">
+        {counts.critical > 0 && <span className="rounded border px-2 py-1 bg-red-500/10 text-red-500 border-red-500/30">{counts.critical} Critical</span>}
+        {counts.warning > 0 && <span className="rounded border px-2 py-1 bg-yellow-500/10 text-yellow-500 border-yellow-500/30">{counts.warning} Warning</span>}
+        {counts.info > 0 && <span className="rounded border px-2 py-1 bg-blue-500/10 text-blue-400 border-blue-500/30">{counts.info} Info</span>}
+      </div>
+      {findings.map((f, i) => (
+        <div key={i} className={`rounded border p-2.5 text-xs ${severityColor[f.severity]}`}>
+          <div className="flex items-center gap-2 font-medium">
+            <span>{severityIcon[f.severity]}</span>
+            <span className="uppercase text-[10px] font-bold">{f.severity}</span>
+            <span className="text-muted-foreground">•</span>
+            <span>{f.nodeType}{f.relation ? ` on ${f.relation}` : ''}</span>
+          </div>
+          <div className="mt-1 text-foreground/80">{f.description}</div>
+          <div className="mt-1 text-green-500/80 italic">💡 {f.suggestion}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DeltaNode({ delta, depth = 0 }: { delta: PlanNodeDelta; depth?: number }) {
+  const [expanded, setExpanded] = useState(true);
+  if (delta.changeType === 'no_change' && !delta.children.some(c => c.changeType !== 'no_change')) return null;
+  const changeColors: Record<string, string> = {
+    modified: 'border-yellow-500/40', added: 'border-green-500/40 bg-green-500/5',
+    removed: 'border-red-500/40 bg-red-500/5', type_changed: 'border-purple-500/40 bg-purple-500/5',
+    no_change: 'border-border',
+  };
+  const dirArrow = (dir: string) => dir === 'improved' ? '↓' : dir === 'regressed' ? '↑' : '–';
+  const dirColor = (dir: string) => dir === 'improved' ? 'text-green-500' : dir === 'regressed' ? 'text-red-500' : 'text-muted-foreground';
+  const hasChildren = delta.children.some(c => c.changeType !== 'no_change');
+  return (
+    <div style={{ marginLeft: depth * 16 }}>
+      <div className={`rounded border p-2 mb-1 text-xs ${changeColors[delta.changeType] || 'border-border'}`}>
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setExpanded(e => !e)}>
+          {hasChildren ? (expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />) : <span className="w-3" />}
+          <span className="font-bold">{delta.nodeType}</span>
+          {delta.relation && <span className="text-muted-foreground">{delta.relation}</span>}
+          <span className={`text-[10px] uppercase font-bold ${delta.changeType === 'added' ? 'text-green-500' : delta.changeType === 'removed' ? 'text-red-500' : delta.changeType === 'type_changed' ? 'text-purple-400' : 'text-yellow-500'}`}>
+            {delta.changeType !== 'no_change' ? delta.changeType.replace('_', ' ') : ''}
+          </span>
+          {delta.oldNodeType && delta.newNodeType && <span className="text-purple-400 text-[10px]">{delta.oldNodeType} → {delta.newNodeType}</span>}
+        </div>
+        {delta.changeType !== 'no_change' && (
+          <div className="flex gap-4 mt-1 text-[10px] flex-wrap">
+            {delta.costDelta !== 0 && <span className={dirColor(delta.costDir)}>Cost: {dirArrow(delta.costDir)} {delta.costPct.toFixed(1)}% ({delta.oldCost.toFixed(0)} → {delta.newCost.toFixed(0)})</span>}
+            {delta.timeDelta !== 0 && <span className={dirColor(delta.timeDir)}>Time: {dirArrow(delta.timeDir)} {delta.timePct.toFixed(1)}% ({formatTime(delta.oldTime)} → {formatTime(delta.newTime)})</span>}
+            {delta.rowsDelta !== 0 && <span>Rows: {delta.oldRows} → {delta.newRows}</span>}
+            {delta.oldLoops !== delta.newLoops && <span>Loops: {delta.oldLoops} → {delta.newLoops}</span>}
+            {delta.oldIndexName !== delta.newIndexName && <span className="text-purple-400">Index: {delta.oldIndexName || '(none)'} → {delta.newIndexName || '(none)'}</span>}
+            {delta.oldFilter !== delta.newFilter && <span className="text-yellow-500">Filter changed</span>}
+            {delta.oldSortSpill !== delta.newSortSpill && <span className={delta.newSortSpill ? 'text-red-500' : 'text-green-500'}>{delta.newSortSpill ? 'Sort now spills to disk' : 'Sort no longer spills'}</span>}
+            {delta.oldHashBatches !== delta.newHashBatches && <span>Hash batches: {delta.oldHashBatches} → {delta.newHashBatches}</span>}
+            {delta.oldBufferReads !== delta.newBufferReads && <span className={dirColor(delta.bufferDir)}>Buffer reads: {delta.oldBufferReads} → {delta.newBufferReads}</span>}
+          </div>
+        )}
+      </div>
+      {expanded && delta.children.map((child, i) => <DeltaNode key={i} delta={child} depth={0} />)}
+    </div>
+  );
+}
 
 export default function ExplainViewer() {
   const activeTab = useAppStore(s => s.tabs.find(t => t.id === s.activeTabId));
@@ -180,6 +256,10 @@ export default function ExplainViewer() {
   const [compareA, setCompareA] = useState<PlanHistoryEntry | null>(null);
   const [compareB, setCompareB] = useState<PlanHistoryEntry | null>(null);
 
+  // Analysis & comparison state
+  const [analysisResult, setAnalysisResult] = useState<PlanAnalysisResult | null>(null);
+  const [comparisonResult, setComparisonResult] = useState<PlanComparisonResult | null>(null);
+
   const runExplain = async () => {
     if (!activeTab?.connectionId || !activeTab.sql.trim()) return;
     setLoading(true);
@@ -189,6 +269,8 @@ export default function ExplainViewer() {
       setPlan(result);
       // Auto-save to history
       await api.savePlanHistory(activeTab.connectionId, activeTab.sql, result);
+      // Run 15-rule analysis
+      try { const analysis = await api.analyzePlan(result); setAnalysisResult(analysis); } catch { /* ignore */ }
       setMode('plan');
     } catch (e: any) {
       setError(e.message);
@@ -246,6 +328,9 @@ export default function ExplainViewer() {
         <Zap className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium mr-2">EXPLAIN Analyzer</span>
         <button onClick={() => setMode('plan')} className={`rounded px-2 py-1 text-xs ${mode === 'plan' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}>Plan</button>
+        <button onClick={() => setMode('findings')} className={`flex items-center gap-1 rounded px-2 py-1 text-xs ${mode === 'findings' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}>
+          <Search className="h-3 w-3" /> Findings{analysisResult?.findings.length ? ` (${analysisResult.findings.length})` : ''}
+        </button>
         <button onClick={() => setMode('settings')} className={`flex items-center gap-1 rounded px-2 py-1 text-xs ${mode === 'settings' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'}`}>
           <Settings className="h-3 w-3" /> Parameters
         </button>
@@ -302,6 +387,13 @@ export default function ExplainViewer() {
               </>
             )}
           </>
+        )}
+
+        {/* ── Findings View (15 rules) ── */}
+        {mode === 'findings' && (
+          analysisResult
+            ? <FindingsPanel findings={analysisResult.findings} />
+            : <div className="text-sm text-muted-foreground py-6 text-center">Run EXPLAIN first to see analysis findings</div>
         )}
 
         {/* ── Feature 6: Parameter Testing ── */}
@@ -420,62 +512,60 @@ export default function ExplainViewer() {
               );
             })}
             {compareA && compareB && (
-              <button onClick={() => setMode('compare')} className="flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 mt-2">
+              <button onClick={async () => {
+                try {
+                  const result = await api.comparePlans(compareA.plan, compareB.plan);
+                  setComparisonResult(result);
+                  setMode('compare');
+                } catch { setMode('compare'); }
+              }} className="flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 mt-2">
                 <GitCompare className="h-3 w-3" /> Compare A vs B
               </button>
             )}
           </div>
         )}
 
-        {/* ── Feature 7: Side-by-side Plan Comparison ── */}
+        {/* ── Feature 7: Per-Node Plan Comparison ── */}
         {mode === 'compare' && compareA && compareB && (
           <div className="space-y-3">
-            <div className="text-xs text-muted-foreground">Side-by-side plan comparison</div>
-            <div className="grid grid-cols-2 gap-3">
-              {[{ label: 'Plan A', entry: compareA, root: compareRootA }, { label: 'Plan B', entry: compareB, root: compareRootB }].map(({ label, entry, root }) => {
-                const execTime = entry.plan?.[0]?.['Execution Time'] || root?.['Actual Total Time'] || 0;
-                return (
-                  <div key={label}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium">{label}</span>
-                      <span className="text-[10px] text-muted-foreground">{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                      {entry.settings && Object.keys(entry.settings).length > 0 && (
-                        <span className="text-[10px] text-blue-400">{Object.entries(entry.settings).map(([k, v]) => `${k}=${v}`).join(', ')}</span>
-                      )}
-                    </div>
-                    <div className="rounded border px-2 py-1 text-xs mb-2">
-                      <span>Exec: {formatTime(execTime)}</span>
-                      <span className="ml-3">Cost: {root?.['Total Cost']?.toFixed(1)}</span>
-                      <span className="ml-3">Root: {root?.['Node Type']}</span>
-                    </div>
-                    {root && <PlanNode node={root} maxTime={compareMaxTime} criticalPath={buildCriticalPath(root)} />}
+            {comparisonResult ? (
+              <>
+                {/* Verdict & Summary */}
+                <div className="rounded border p-3 text-xs space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm">{comparisonResult.summary.verdict}</span>
                   </div>
-                );
-              })}
-            </div>
-            {/* Delta summary */}
-            {(() => {
-              const timeA = compareA.plan?.[0]?.['Execution Time'] || compareRootA?.['Actual Total Time'] || 0;
-              const timeB = compareB.plan?.[0]?.['Execution Time'] || compareRootB?.['Actual Total Time'] || 0;
-              const costA = compareRootA?.['Total Cost'] || 0;
-              const costB = compareRootB?.['Total Cost'] || 0;
-              const timeDelta = timeB - timeA;
-              const costDelta = costB - costA;
-              return (
-                <div className="rounded border p-2 text-xs">
-                  <span className="font-medium">Delta (B − A): </span>
-                  <span className={timeDelta < 0 ? 'text-green-500' : timeDelta > 0 ? 'text-red-500' : ''}>
-                    Time: {timeDelta > 0 ? '+' : ''}{formatTime(timeDelta)}
-                  </span>
-                  <span className={`ml-4 ${costDelta < 0 ? 'text-green-500' : costDelta > 0 ? 'text-red-500' : ''}`}>
-                    Cost: {costDelta > 0 ? '+' : ''}{costDelta.toFixed(1)}
-                  </span>
-                  {compareRootA?.['Node Type'] !== compareRootB?.['Node Type'] && (
-                    <span className="ml-4 text-yellow-500">Plan changed: {compareRootA?.['Node Type']} → {compareRootB?.['Node Type']}</span>
-                  )}
+                  <div className="flex gap-4 flex-wrap text-[11px]">
+                    <span className={comparisonResult.summary.timeDir === 'improved' ? 'text-green-500' : comparisonResult.summary.timeDir === 'regressed' ? 'text-red-500' : ''}>
+                      Time: {formatTime(comparisonResult.summary.oldExecutionTime)} → {formatTime(comparisonResult.summary.newExecutionTime)} ({comparisonResult.summary.timePct > 0 ? '+' : ''}{comparisonResult.summary.timePct.toFixed(1)}%)
+                    </span>
+                    <span className={comparisonResult.summary.costDir === 'improved' ? 'text-green-500' : comparisonResult.summary.costDir === 'regressed' ? 'text-red-500' : ''}>
+                      Cost: {comparisonResult.summary.oldTotalCost.toFixed(0)} → {comparisonResult.summary.newTotalCost.toFixed(0)} ({comparisonResult.summary.costPct > 0 ? '+' : ''}{comparisonResult.summary.costPct.toFixed(1)}%)
+                    </span>
+                    {comparisonResult.summary.nodesAdded > 0 && <span className="text-green-500">+{comparisonResult.summary.nodesAdded} added</span>}
+                    {comparisonResult.summary.nodesRemoved > 0 && <span className="text-red-500">-{comparisonResult.summary.nodesRemoved} removed</span>}
+                    {comparisonResult.summary.nodesModified > 0 && <span className="text-yellow-500">{comparisonResult.summary.nodesModified} modified</span>}
+                    {comparisonResult.summary.nodesTypeChanged > 0 && <span className="text-purple-400">{comparisonResult.summary.nodesTypeChanged} type changed</span>}
+                  </div>
                 </div>
-              );
-            })()}
+                {/* Per-node diff tree */}
+                <div className="text-xs font-medium">Node-by-node diff (Plan A → Plan B)</div>
+                {comparisonResult.deltas.map((d, i) => <DeltaNode key={i} delta={d} />)}
+              </>
+            ) : (
+              /* Fallback: old side-by-side */
+              <div className="grid grid-cols-2 gap-3">
+                {[{ label: 'Plan A', entry: compareA, root: compareRootA }, { label: 'Plan B', entry: compareB, root: compareRootB }].map(({ label, entry, root }) => {
+                  const execTime = entry.plan?.[0]?.['Execution Time'] || root?.['Actual Total Time'] || 0;
+                  return (
+                    <div key={label}>
+                      <div className="text-xs font-medium mb-1">{label} — {formatTime(execTime)}</div>
+                      {root && <PlanNode node={root} maxTime={compareMaxTime} criticalPath={buildCriticalPath(root)} />}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

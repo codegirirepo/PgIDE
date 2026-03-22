@@ -2,6 +2,7 @@ import type {
   ConnectionConfig, SavedConnection, BatchResult, AutocompleteData,
   ExplainNode, IndexSuggestion, TableStat, SchemaDiff, SlowQuery, ERTable, ERRelationship,
   PlanHistoryEntry, PgVectorStatus, PgVectorHint,
+  PlanAnalysisResult, PlanComparisonResult, FunctionDetails,
 } from '@/types';
 
 const BASE = '/api';
@@ -41,6 +42,8 @@ export const api = {
     request<{ name: string; type: string; args: string }[]>(`/metadata/${connId}/schemas/${schema}/functions`),
   getFunctionDefinition: (connId: string, schema: string, funcName: string, args?: string) =>
     request<{ definition: string }>(`/metadata/${connId}/schemas/${schema}/functions/${encodeURIComponent(funcName)}/definition${args ? `?args=${encodeURIComponent(args)}` : ''}`),
+  getFunctionParameters: (connId: string, schema: string, funcName: string, args?: string) =>
+    request<FunctionDetails>(`/metadata/${connId}/schemas/${schema}/functions/${encodeURIComponent(funcName)}/parameters${args ? `?args=${encodeURIComponent(args)}` : ''}`),
   getColumns: (connId: string, schema: string, table: string) =>
     request<any[]>(`/metadata/${connId}/schemas/${schema}/tables/${table}/columns`),
   getIndexes: (connId: string, schema: string, table: string) =>
@@ -80,6 +83,29 @@ export const api = {
     request<PlanHistoryEntry[]>(`/advanced/plan-history${connId ? `/${connId}` : ''}`),
   clearPlanHistory: () =>
     request<{ success: boolean }>('/advanced/plan-history', { method: 'DELETE' }),
+
+  // Plan analysis & comparison
+  analyzePlan: (plan: any) =>
+    request<PlanAnalysisResult>('/advanced/analyze-plan', { method: 'POST', body: JSON.stringify({ plan }) }),
+  comparePlans: (oldPlan: any, newPlan: any, threshold = 5) =>
+    request<PlanComparisonResult>('/advanced/compare-plans', { method: 'POST', body: JSON.stringify({ oldPlan, newPlan, threshold }) }),
+
+  // Vacuum
+  vacuumTable: (connectionId: string, schema: string, table: string) =>
+    request<{ success: boolean; message: string }>('/advanced/vacuum', { method: 'POST', body: JSON.stringify({ connectionId, schema, table }) }),
+
+  // Dump & Import
+  getDumpSchemas: (connId: string) => request<string[]>(`/dump/schemas/${connId}`),
+  exportDatabase: async (connectionId: string, options: { schemaOnly?: boolean; dataOnly?: boolean; tables?: string[]; schema?: string } = {}) => {
+    const res = await fetch(`${BASE}/dump/export`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectionId, ...options }),
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Export failed'); }
+    return res.text();
+  },
+  importSQL: (connectionId: string, sql: string) =>
+    request<{ success: boolean; message: string }>('/dump/import', { method: 'POST', body: JSON.stringify({ connectionId, sql }) }),
 
   // pgvector
   getPgVectorStatus: (connId: string) => request<PgVectorStatus>(`/metadata/${connId}/pgvector`),

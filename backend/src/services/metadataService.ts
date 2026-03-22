@@ -83,6 +83,91 @@ export async function getFunctionDefinition(connectionId: string, schema: string
   return res.rows[0].definition;
 }
 
+export async function getFunctionParameters(connectionId: string, schema: string, funcName: string, args: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+  const res = await pool.query(`
+    SELECT
+      p.parameter_name AS name,
+      p.data_type AS data_type,
+      p.udt_name AS udt_name,
+      p.parameter_mode AS mode,
+      p.parameter_default AS default_value,
+      p.ordinal_position AS position
+    FROM information_schema.parameters p
+    JOIN information_schema.routines r
+      ON p.specific_name = r.specific_name AND p.specific_schema = r.specific_schema
+    WHERE r.routine_schema = $1 AND r.routine_name = $2
+    ORDER BY p.ordinal_position
+  `, [schema, funcName]);
+
+  if (res.rows.length === 0) {
+    const fallback = await pool.query(`
+      SELECT
+        p.proargnames AS arg_names,
+        pg_get_function_arguments(p.oid) AS args_full,
+        pg_get_function_result(p.oid) AS return_type,
+        p.provolatile AS volatility,
+        CASE p.prokind WHEN 'f' THEN 'FUNCTION' WHEN 'p' THEN 'PROCEDURE' WHEN 'a' THEN 'AGGREGATE' WHEN 'w' THEN 'WINDOW' END AS kind
+      FROM pg_proc p
+      JOIN pg_namespace n ON p.pronamespace = n.oid
+      WHERE n.nspname = $1 AND p.proname = $2
+      ${args ? `AND pg_get_function_identity_arguments(p.oid) = $3` : ''}
+      LIMIT 1
+    `, args ? [schema, funcName, args] : [schema, funcName]);
+
+    if (fallback.rows.length > 0) {
+      const row = fallback.rows[0];
+      const argParts = (row.args_full || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+      const names: string[] = row.arg_names || [];
+      const params = argParts.map((part: string, i: number) => {
+        const tokens = part.split(/\s+/);
+        let mode = 'IN';
+        let pName = '';
+        let dataType = part;
+        if (['IN', 'OUT', 'INOUT', 'VARIADIC'].includes(tokens[0]?.toUpperCase())) {
+          mode = tokens.shift()!.toUpperCase();
+        }
+        if (tokens.length > 1) {
+          pName = tokens.shift()!;
+          dataType = tokens.join(' ');
+        } else {
+          dataType = tokens.join(' ');
+          pName = names[i] || '';
+        }
+        return { name: pName, data_type: dataType, udt_name: dataType, mode, default_value: null, position: i + 1 };
+      });
+      return {
+        parameters: params,
+        return_type: row.return_type || 'void',
+        volatility: row.volatility === 'i' ? 'IMMUTABLE' : row.volatility === 's' ? 'STABLE' : 'VOLATILE',
+        kind: row.kind || 'FUNCTION',
+      };
+    }
+  }
+
+  // Get return type and volatility from pg_proc
+  const metaRes = await pool.query(`
+    SELECT
+      pg_get_function_result(p.oid) AS return_type,
+      p.provolatile AS volatility,
+      CASE p.prokind WHEN 'f' THEN 'FUNCTION' WHEN 'p' THEN 'PROCEDURE' WHEN 'a' THEN 'AGGREGATE' WHEN 'w' THEN 'WINDOW' END AS kind
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = $1 AND p.proname = $2
+    ${args ? `AND pg_get_function_identity_arguments(p.oid) = $3` : ''}
+    LIMIT 1
+  `, args ? [schema, funcName, args] : [schema, funcName]);
+
+  const meta = metaRes.rows[0] || {};
+  return {
+    parameters: res.rows,
+    return_type: meta.return_type || 'void',
+    volatility: meta.volatility === 'i' ? 'IMMUTABLE' : meta.volatility === 's' ? 'STABLE' : 'VOLATILE',
+    kind: meta.kind || 'FUNCTION',
+  };
+}
+
 export async function getColumns(connectionId: string, schema: string, table: string) {
   const pool = getPool(connectionId);
   if (!pool) throw new Error('Not connected');

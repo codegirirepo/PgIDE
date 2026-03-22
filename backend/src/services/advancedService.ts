@@ -368,7 +368,16 @@ export async function getERDiagram(connectionId: string, schema: string) {
   return { tables, relationships: fkRes.rows };
 }
 
-// ─── 8. ROW EDIT ───
+// ─── 8. VACUUM TABLE ───
+export async function vacuumTable(connectionId: string, schema: string, table: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+  const q = `VACUUM ANALYZE "${schema.replace(/"/g, '""')}"."${table.replace(/"/g, '""')}"`;
+  await pool.query(q);
+  return { success: true, message: `VACUUM ANALYZE completed on "${schema}"."${table}"` };
+}
+
+// ─── 9. ROW EDIT ───
 export async function getPrimaryKeyColumns(connectionId: string, schema: string, table: string) {
   const pool = getPool(connectionId);
   if (!pool) throw new Error('Not connected');

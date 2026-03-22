@@ -1,6 +1,6 @@
 # 🚀 PgIDE Launch Posts
 
-> Replace `<your-username>` with your GitHub username and `<DEMO_GIF_URL>` with your actual demo GIF/screenshot URLs before posting.
+> Replace `<DEMO_GIF_URL>` with your actual demo GIF/screenshot URLs before posting.
 
 ---
 
@@ -34,7 +34,7 @@ Tech stack: React 18, TypeScript, Vite, Node.js/Express, node-postgres, Monaco E
 
 Credentials are AES-256 encrypted at rest. All queries are parameterized.
 
-GitHub: https://github.com/<your-username>/pgide
+GitHub: https://github.com/codegirirepo/PgIDE
 MIT Licensed.
 
 Would love feedback — especially on the EXPLAIN visualizer and pgvector features. What else would you want in a Postgres IDE?
@@ -88,7 +88,7 @@ I built it because I wanted a single tool that combines querying, performance an
 
 **Tech:** React 18 + TypeScript + Vite + Node.js/Express + node-postgres. Optional Electron desktop app. MIT licensed.
 
-GitHub: https://github.com/<your-username>/pgide
+GitHub: https://github.com/codegirirepo/PgIDE
 
 I'd love to hear what features you'd find most useful, and what's missing. Feedback from actual Postgres users means a lot!
 ```
@@ -121,7 +121,7 @@ Built a self-hosted PostgreSQL IDE that runs in the browser. No cloud, no accoun
 
 Credentials are AES-256 encrypted at rest. No telemetry, no external calls.
 
-GitHub: https://github.com/<your-username>/pgide (MIT)
+GitHub: https://github.com/codegirirepo/PgIDE (MIT)
 
 [SCREENSHOT/GIF HERE]
 ```
@@ -152,7 +152,7 @@ Some challenges I ran into:
 
 **Tech stack:** React 18, TypeScript, Vite 5, Monaco Editor, TailwindCSS, Radix UI, Zustand, TanStack Virtual, react-resizable-panels
 
-GitHub: https://github.com/<your-username>/pgide (MIT)
+GitHub: https://github.com/codegirirepo/PgIDE (MIT)
 
 Happy to discuss any of the implementation details!
 ```
@@ -256,9 +256,9 @@ PostgreSQL's EXPLAIN output format has many node types, each with different prop
 
 ## Try It
 
-GitHub: [https://github.com/<your-username>/pgide](https://github.com/<your-username>/pgide)
+GitHub: [https://github.com/codegirirepo/PgIDE](https://github.com/codegirirepo/PgIDE)
 
-git clone https://github.com/<your-username>/pgide.git
+git clone https://github.com/codegirirepo/PgIDE.git
 cd pgide
 npm run install:all
 npm run dev
@@ -288,7 +288,7 @@ I built an open-source PostgreSQL IDE 🐘
 
 React + TypeScript + Node.js. MIT licensed.
 
-🔗 https://github.com/<your-username>/pgide
+🔗 https://github.com/codegirirepo/PgIDE
 
 [ATTACH DEMO GIF]
 
@@ -343,7 +343,7 @@ All open source, MIT licensed 🎉
 ```
 Try it in 3 commands:
 
-git clone https://github.com/<your-username>/pgide.git
+git clone https://github.com/codegirirepo/PgIDE.git
 cd pgide && npm run install:all
 npm run dev
 
@@ -374,7 +374,7 @@ What makes it different:
 
 Built with React 18, TypeScript, Monaco Editor (VS Code engine), Node.js, and Express. Runs in the browser or as an Electron desktop app. MIT licensed.
 
-GitHub: https://github.com/<your-username>/pgide
+GitHub: https://github.com/codegirirepo/PgIDE
 
 If you work with PostgreSQL, I'd love your feedback. And if you find it useful, a ⭐ on GitHub would mean a lot!
 
@@ -445,4 +445,4 @@ Would love to hear what features you'd want to see next!
 
 4. **Track with GitHub stars** — Each platform will drive stars at different rates. This helps you know which communities resonate most.
 
-5. **Update README before posting** — Replace `<your-username>` in clone URLs and add actual screenshots.
+5. **Update README before posting** — Add actual screenshots before posting.

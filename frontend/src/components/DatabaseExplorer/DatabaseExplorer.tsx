@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { api } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
-import type { TreeNode } from '@/types';
+import type { TreeNode, FunctionDetails } from '@/types';
 import {
   ChevronRight, ChevronDown, Database, Table, Eye, FunctionSquare,
-  Folder, Columns, RefreshCw, Search, Loader2,
+  Folder, Columns, RefreshCw, Search, Loader2, X,
 } from 'lucide-react';
 
 const ICONS: Record<string, React.ElementType> = {
@@ -21,6 +21,7 @@ export default function DatabaseExplorer() {
   const [loading, setLoading] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
   const [filter, setFilter] = useState('');
+  const [funcDetails, setFuncDetails] = useState<{ node: TreeNode; details: FunctionDetails } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -122,6 +123,16 @@ export default function DatabaseExplorer() {
     setContextMenu({ x: e.clientX, y: e.clientY, node });
   };
 
+  const openSqlInNewTab = (sql: string, title: string, connId: string | null | undefined) => {
+    const cid = connId || activeConnectionId;
+    addTab(cid);
+    setTimeout(() => {
+      const tabId = useAppStore.getState().activeTabId;
+      if (tabId) updateTab(tabId, { sql, title, connectionId: cid });
+    }, 0);
+    setContextMenu(null);
+  };
+
   const openSqlInEditor = (sql: string, connId: string | null | undefined) => {
     const cid = connId || activeConnectionId;
     if (tabs.length === 0 || !activeTabId) {
@@ -142,7 +153,7 @@ export default function DatabaseExplorer() {
       case 'count': sql = `SELECT count(*) FROM "${schema}"."${node.label}";`; break;
       case 'drop': sql = `-- DROP TABLE "${schema}"."${node.label}";`; break;
     }
-    if (sql) openSqlInEditor(sql, node.connectionId);
+    if (sql) openSqlInNewTab(sql, `${node.label} — ${action}`, node.connectionId);
   };
 
   const viewFunction = async (node: TreeNode) => {
@@ -152,14 +163,33 @@ export default function DatabaseExplorer() {
     const args = node.meta?.args || '';
     try {
       const { definition } = await api.getFunctionDefinition(connId, node.schema, funcName, args);
-      openSqlInEditor(definition, connId);
+      openSqlInNewTab(definition, `${funcName}()`, connId);
     } catch (e: any) {
-      // Fallback: generate a basic SELECT for the function source
-      openSqlInEditor(
+      openSqlInNewTab(
         `-- Could not retrieve definition: ${e.message}\n-- Try manually:\nSELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname = '${funcName}';`,
+        `${funcName}()`,
         connId,
       );
     }
+  };
+
+  const viewFunctionParams = async (node: TreeNode) => {
+    const connId = node.connectionId || activeConnectionId;
+    if (!connId || !node.schema) return;
+    const funcName = node.meta?.funcName || node.label;
+    const args = node.meta?.args || '';
+    setLoading(node.id);
+    try {
+      const details = await api.getFunctionParameters(connId, node.schema, funcName, args);
+      setFuncDetails({ node, details });
+    } catch (e: any) {
+      setFuncDetails({
+        node,
+        details: { parameters: [], return_type: 'unknown', volatility: 'unknown', kind: 'FUNCTION' },
+      });
+    }
+    setLoading(null);
+    setContextMenu(null);
   };
 
   const refreshNode = (node: TreeNode) => {
@@ -255,6 +285,9 @@ export default function DatabaseExplorer() {
               <button className="w-full px-3 py-1.5 text-left text-sm hover:bg-accent" onClick={() => viewFunction(contextMenu.node)}>
                 View/Edit Definition
               </button>
+              <button className="w-full px-3 py-1.5 text-left text-sm hover:bg-accent" onClick={() => viewFunctionParams(contextMenu.node)}>
+                View Parameters
+              </button>
               <button className="w-full px-3 py-1.5 text-left text-sm hover:bg-accent" onClick={() => {
                 const schema = contextMenu.node.schema || 'public';
                 const funcName = contextMenu.node.meta?.funcName || contextMenu.node.label;
@@ -279,6 +312,61 @@ export default function DatabaseExplorer() {
           <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent" onClick={() => refreshNode(contextMenu.node)}>
             <RefreshCw className="h-3 w-3" /> Refresh
           </button>
+        </div>
+      )}
+      {/* Function Parameters Panel */}
+      {funcDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setFuncDetails(null)}>
+          <div className="w-[520px] max-h-[70vh] overflow-auto rounded-lg border bg-card shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b px-4 py-2.5">
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                <FunctionSquare className="h-4 w-4 text-primary" />
+                {funcDetails.node.meta?.funcName || funcDetails.node.label}
+              </h3>
+              <button onClick={() => setFuncDetails(null)} className="rounded p-1 hover:bg-accent">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="flex gap-4 text-xs">
+                <span className="text-muted-foreground">Kind: <span className="text-foreground">{funcDetails.details.kind}</span></span>
+                <span className="text-muted-foreground">Returns: <span className="text-foreground font-mono">{funcDetails.details.return_type}</span></span>
+                <span className="text-muted-foreground">Volatility: <span className="text-foreground">{funcDetails.details.volatility}</span></span>
+              </div>
+              {funcDetails.details.parameters.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">No parameters</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="py-1.5 pr-3">#</th>
+                      <th className="py-1.5 pr-3">Name</th>
+                      <th className="py-1.5 pr-3">Mode</th>
+                      <th className="py-1.5 pr-3">Data Type</th>
+                      <th className="py-1.5">Default</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {funcDetails.details.parameters.map((p, i) => (
+                      <tr key={i} className="border-b border-border/50 hover:bg-accent/50">
+                        <td className="py-1.5 pr-3 text-muted-foreground">{p.position}</td>
+                        <td className="py-1.5 pr-3 font-mono">{p.name || <span className="text-muted-foreground italic">unnamed</span>}</td>
+                        <td className="py-1.5 pr-3">
+                          <span className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                            p.mode === 'OUT' ? 'bg-blue-500/15 text-blue-500'
+                            : p.mode === 'INOUT' ? 'bg-yellow-500/15 text-yellow-500'
+                            : 'bg-green-500/15 text-green-500'
+                          }`}>{p.mode}</span>
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono">{p.data_type}</td>
+                        <td className="py-1.5 font-mono text-muted-foreground">{p.default_value ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

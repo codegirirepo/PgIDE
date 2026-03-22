@@ -72,6 +72,8 @@
 | **Memory & Spill Warnings** | Detects sorts/hashes spilling to disk and suggests `work_mem` adjustments. |
 | **Parameter Testing** | Override planner parameters (`work_mem`, `random_page_cost`, etc.) and re-run EXPLAIN to see plan changes side-by-side. |
 | **Plan History & Comparison** | Save execution plans over time. Select any two plans for side-by-side diff with delta summary. |
+| **15-Rule Plan Analysis** | Runs 15+ intelligent rules (ported from pgplan) against EXPLAIN output: sort/hash spills, seq scan in joins, index filter inefficiency, bitmap recheck, nested loop high loops, correlated subplans, worker mismatch, parallel overhead, large join filter removal, excessive materialization, low selectivity, wide rows, temp I/O, and CTE estimate mismatches. Each finding includes severity (Critical/Warning/Info) and actionable suggestions. |
+| **Per-Node Plan Comparison** | Semantically diffs two plans node-by-node: cost, time, rows, buffers, filters, indexes, sort spills, hash batches. Shows added/removed/type-changed nodes with a verdict summary. |
 | **Index Advisor** | Analyzes queries and suggests missing indexes with ready-to-run `CREATE INDEX` statements. |
 | **Slow Query Dashboard** | Reads `pg_stat_statements` to surface the most expensive queries with call counts, timing, and cache hit ratios. |
 | **Table Stats Dashboard** | Shows live/dead rows, bloat percentage, vacuum status, index hit ratios, and health indicators for every table. |
@@ -83,6 +85,23 @@
 | **ER Diagram** | Interactive entity-relationship diagram with drag-and-drop positioning, zoom/pan, and relationship highlighting. |
 | **Schema Diff** | Compare schemas across two connected databases. Shows added/removed/modified tables and columns. |
 | **Migration Generator** | Auto-generates migration SQL from schema diffs. Copy or open directly in the editor. |
+
+### Visual Query Builder
+
+| Feature | Description |
+|---------|-------------|
+| **Drag-and-Drop Tables** | Select tables from a dropdown to add them to a visual canvas powered by ReactFlow. |
+| **Visual JOINs** | Connect columns between tables to create JOIN relationships. Click edges to change join type (INNER, LEFT, RIGHT, FULL OUTER, CROSS). |
+| **Column Selection** | Check/uncheck columns per table. Apply aggregate functions (COUNT, SUM, AVG, MIN, MAX) to selected columns. |
+| **Query Settings Panel** | Configure WHERE conditions (with AND/OR logic and HAVING support), GROUP BY, ORDER BY, and LIMIT — all visually. |
+| **Real-time SQL** | SQL is generated in real-time as you build the query and synced to the editor tab. |
+
+### SQL Dump & Import
+
+| Feature | Description |
+|---------|-------------|
+| **Database Export** | Export your database (or specific schemas) to a `.sql` file. Options for schema-only or data-only dumps. |
+| **SQL Import** | Upload a `.sql` file or paste SQL directly to import into a connected database. Runs in a transaction with rollback on error. |
 
 ### pgvector / AI Embeddings Support
 
@@ -105,6 +124,7 @@
 | UI | TailwindCSS + Radix UI primitives |
 | Editor | Monaco Editor (VS Code engine) |
 | State | Zustand |
+| Visual Query | ReactFlow (@xyflow/react) |
 | Grid | TanStack Virtual (virtualized rows) |
 | Panels | react-resizable-panels |
 | Backend | Node.js + Express + TypeScript |
@@ -119,17 +139,21 @@ PgIDE/
 ├── backend/
 │   └── src/
 │       ├── index.ts                    # Express server entry
-│       ├── routes/
-│       │   ├── connections.ts          # Connection CRUD + connect/disconnect
-│       │   ├── metadata.ts             # Database explorer + pgvector APIs
-│       │   ├── query.ts                # Query execution + cancel
-│       │   └── advanced.ts             # EXPLAIN, index advice, stats, diff
-│       ├── services/
-│       │   ├── connectionManager.ts    # Pool management + encryption
-│       │   ├── metadataService.ts      # Schema/table/column queries
-│       │   ├── queryExecutor.ts        # SQL execution with pagination
-│       │   ├── advancedService.ts      # EXPLAIN, stats, diff engine
-│       │   └── pgvectorService.ts      # pgvector detection + analysis
+│       │   ├── routes/
+│       │   │   ├── connections.ts          # Connection CRUD + connect/disconnect
+│       │   │   ├── metadata.ts             # Database explorer + pgvector APIs
+│       │   │   ├── query.ts                # Query execution + cancel
+│       │   │   ├── advanced.ts             # EXPLAIN, index advice, stats, diff
+│       │   │   └── dump.ts                 # SQL dump & import
+│       │   ├── services/
+│       │   │   ├── connectionManager.ts    # Pool management + encryption
+│       │   │   ├── metadataService.ts      # Schema/table/column queries
+│       │   │   ├── queryExecutor.ts        # SQL execution with pagination
+│       │   │   ├── advancedService.ts      # EXPLAIN, stats, diff engine
+│       │   │   ├── planAnalyzer.ts         # 15-rule EXPLAIN plan analysis
+│       │   │   ├── planComparator.ts       # Per-node plan comparison
+│       │   │   ├── dumpService.ts          # SQL dump & import
+│       │   │   └── pgvectorService.ts      # pgvector detection + analysis
 │       └── utils/
 │           └── encryption.ts           # AES credential encryption
 ├── frontend/
@@ -140,21 +164,26 @@ PgIDE/
 │       │   ├── QueryEditor/            # Monaco editor + tabs
 │       │   ├── ResultsViewer/          # Data grid + infinite scroll + export
 │       │   ├── TableDesigner/          # Table structure viewer
-│       │   ├── ExplainViewer/          # Visual EXPLAIN + plan comparison
+│       │   ├── ExplainViewer/          # Visual EXPLAIN + plan analysis + comparison
 │       │   ├── IndexAdvisor/           # Index recommendation engine
 │       │   ├── TableStats/             # Table health dashboard
 │       │   ├── SlowQueries/            # pg_stat_statements viewer
 │       │   ├── ERDiagram/              # Interactive ER diagram (SVG)
 │       │   ├── SchemaDiff/             # Schema comparison + migration
+│       │   ├── VisualQueryBuilder/     # Drag-and-drop visual query builder
+│       │   ├── DumpImport/             # SQL dump & import
+│       │   ├── KeyboardShortcuts/      # Customizable keyboard shortcuts
 │       │   ├── PgVectorAdvisor/        # pgvector hints + templates
 │       │   ├── Bookmarks/              # Query bookmark manager
 │       │   └── Layout/                 # App shell + history panel
 │       ├── services/
 │       │   ├── api.ts                  # Backend API client
+│       │   ├── visualQueryBuilder.ts   # Visual query SQL generation
 │       │   └── pgvector/
 │       │       └── pgvectorAnalyzer.ts # Client-side vector SQL analysis
 │       ├── store/
-│       │   └── useAppStore.ts          # Zustand global state
+│       │   ├── useAppStore.ts          # Zustand global state
+│       │   └── useShortcutStore.ts     # Customizable keyboard shortcuts
 │       └── types/
 │           └── index.ts                # TypeScript interfaces
 ├── electron/                           # Optional desktop wrapper
@@ -175,7 +204,7 @@ PgIDE/
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-username>/pgide.git
+git clone https://github.com/codegirirepo/PgIDE.git
 cd pgide
 npm run install:all
 ```
@@ -247,8 +276,18 @@ Navigate to **http://localhost:5173**
 | `GET` | `/api/advanced/table-stats/:connId` | Table health stats + cache hit ratio |
 | `GET` | `/api/advanced/slow-queries/:connId` | Top slow queries from pg_stat_statements |
 | `GET` | `/api/advanced/er-diagram/:connId/:schema` | ER diagram data (tables + relationships) |
+| `POST` | `/api/advanced/analyze-plan` | Run 15-rule analysis on an EXPLAIN plan |
+| `POST` | `/api/advanced/compare-plans` | Per-node diff of two EXPLAIN plans |
 | `POST` | `/api/advanced/schema-diff` | Compare schemas between two databases |
 | `POST` | `/api/advanced/migration` | Generate migration SQL from schema diff |
+
+### Dump & Import
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/dump/schemas/:connId` | List schemas available for dump |
+| `POST` | `/api/dump/export` | Export database to SQL |
+| `POST` | `/api/dump/import` | Import SQL into database |
 
 ## ⌨️ Keyboard Shortcuts
 
@@ -256,6 +295,14 @@ Navigate to **http://localhost:5173**
 |----------|--------|
 | `Ctrl+Enter` | Execute full query |
 | `Ctrl+Shift+Enter` | Execute selected text only |
+| `Ctrl+T` | New tab |
+| `Ctrl+W` | Close tab |
+| `Ctrl+B` | Toggle sidebar |
+| `Ctrl+E` | Focus editor |
+| `Ctrl+D` | Save bookmark |
+| `Ctrl+Shift+T` | Toggle theme |
+
+All shortcuts are fully customizable from the **Shortcuts** panel in the toolbar.
 
 ## 🔒 Security
 

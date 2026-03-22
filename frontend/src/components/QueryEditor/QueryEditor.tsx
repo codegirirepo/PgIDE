@@ -1,19 +1,59 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { api } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
 import { analyzeSQL } from '@/services/pgvector/pgvectorAnalyzer';
 import type { AutocompleteData } from '@/types';
-import { Play, Plus, X, Square, Loader2 } from 'lucide-react';
+import { Play, Plus, X, Square, Loader2, ChevronDown, Plug, Database } from 'lucide-react';
+import { useShortcutStore } from '@/store/useShortcutStore';
 
 let autocompleteCache: Record<string, AutocompleteData> = {};
 
-export default function QueryEditor() {
-  const { tabs, activeTabId, addTab, removeTab, setActiveTab, updateTab, activeConnectionId, connections, addHistory } = useAppStore();
+export default function QueryEditor({ onOpenConnectionManager }: { onOpenConnectionManager?: () => void }) {
+  const { tabs, activeTabId, addTab, removeTab, setActiveTab, updateTab, activeConnectionId, connections, addHistory, setConnectionStatus, setActiveConnection } = useAppStore();
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
+  const [connDropdownOpen, setConnDropdownOpen] = useState(false);
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const activeTab = tabs.find(t => t.id === activeTabId);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!connDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setConnDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [connDropdownOpen]);
+
+  const handleQuickConnect = async (connId: string) => {
+    const conn = connections.find(c => c.id === connId);
+    if (!conn) return;
+    if (conn.connected) {
+      // Already connected — just assign to this tab
+      if (activeTab) updateTab(activeTab.id, { connectionId: connId });
+      setActiveConnection(connId);
+      setConnDropdownOpen(false);
+      return;
+    }
+    // Need to connect first
+    setConnecting(connId);
+    try {
+      const res = await api.connect(connId);
+      if (res.success) {
+        setConnectionStatus(connId, true);
+        setActiveConnection(connId);
+        if (activeTab) updateTab(activeTab.id, { connectionId: connId });
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setConnecting(null);
+    setConnDropdownOpen(false);
+  };
 
   const registerAutocomplete = useCallback(async (monaco: any) => {
     if (!activeConnectionId) return;
@@ -259,8 +299,65 @@ export default function QueryEditor() {
               <Square className="h-3 w-3" /> Cancel
             </button>
           )}
-          <span className="text-xs text-muted-foreground">Connected: {connName}</span>
-          <span className="text-xs text-muted-foreground ml-auto">Ctrl+Enter to execute | Ctrl+Shift+Enter for selection</span>
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setConnDropdownOpen(v => !v)}
+              className={`flex items-center gap-1 text-xs rounded px-1.5 py-0.5 ${
+                activeTab?.connectionId
+                  ? 'text-muted-foreground hover:bg-accent'
+                  : 'text-yellow-500 hover:bg-yellow-500/10 border border-yellow-500/30'
+              }`}
+            >
+              <Database className="h-3 w-3" />
+              {activeTab?.connectionId ? connName : 'No Connection'}
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            {connDropdownOpen && (
+              <div className="absolute top-full left-0 z-50 mt-1 w-56 rounded-md border bg-popover shadow-lg">
+                {connections.length === 0 ? (
+                  <button
+                    onClick={() => { setConnDropdownOpen(false); onOpenConnectionManager?.(); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-accent"
+                  >
+                    <Plus className="h-3 w-3" /> Add a connection…
+                  </button>
+                ) : (
+                  <>
+                    <div className="px-3 py-1.5 text-[10px] text-muted-foreground font-medium border-b">Select Connection</div>
+                    <div className="max-h-48 overflow-auto py-1">
+                      {connections.map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => handleQuickConnect(c.id)}
+                          disabled={connecting === c.id}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
+                        >
+                          <span className={`h-2 w-2 rounded-full shrink-0 ${c.connected ? 'bg-green-500' : 'bg-gray-400'}`} />
+                          <span className="truncate flex-1 text-left">{c.name}</span>
+                          {connecting === c.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                          ) : !c.connected ? (
+                            <Plug className="h-3 w-3 text-muted-foreground shrink-0" />
+                          ) : activeTab?.connectionId === c.id ? (
+                            <span className="text-[10px] text-green-500">active</span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="border-t">
+                      <button
+                        onClick={() => { setConnDropdownOpen(false); onOpenConnectionManager?.(); }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent text-muted-foreground"
+                      >
+                        <Plus className="h-3 w-3" /> Manage connections…
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          <span className="text-xs text-muted-foreground ml-auto">{useShortcutStore.getState().getKeys('executeQuery')} to execute | {useShortcutStore.getState().getKeys('executeSelection')} for selection</span>
         </div>
       )}
 

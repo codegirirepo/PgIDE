@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
 import type { TableStat } from '@/types';
-import { BarChart3, RefreshCw, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { BarChart3, RefreshCw, Loader2, AlertTriangle, CheckCircle2, Sparkles } from 'lucide-react';
 
 function formatSize(bytes: number) {
   if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
@@ -25,6 +25,7 @@ export default function TableStats() {
   const [stats, setStats] = useState<{ tables: TableStat[]; cacheHitRatio: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'dead_rows', dir: 'desc' });
+  const [vacuuming, setVacuuming] = useState<string | null>(null);
 
   const load = async () => {
     if (!connId) return;
@@ -91,10 +92,30 @@ export default function TableStats() {
                     <td className="border-b px-2 py-1.5">{Number(t.seq_scan).toLocaleString()}</td>
                     <td className="border-b px-2 py-1.5 text-muted-foreground">{timeAgo(t.last_autovacuum || t.last_vacuum)}</td>
                     <td className="border-b px-2 py-1.5">
-                      {needsVacuum || noIndex ? (
-                        <span className="flex items-center gap-1 text-yellow-500"><AlertTriangle className="h-3 w-3" />
-                          {needsVacuum ? 'Needs VACUUM' : 'Low idx usage'}
+                      {needsVacuum ? (
+                        <span className="flex items-center gap-1">
+                          <span className="flex items-center gap-1 text-yellow-500"><AlertTriangle className="h-3 w-3" /> Needs VACUUM</span>
+                          <button
+                            onClick={async () => {
+                              if (!connId) return;
+                              const key = `${t.schema}.${t.table}`;
+                              setVacuuming(key);
+                              try {
+                                await api.vacuumTable(connId, t.schema, t.table);
+                                await load();
+                              } catch {}
+                              setVacuuming(null);
+                            }}
+                            disabled={vacuuming === `${t.schema}.${t.table}`}
+                            className="ml-1 flex items-center gap-1 rounded bg-yellow-600 px-1.5 py-0.5 text-[10px] text-white hover:bg-yellow-700 disabled:opacity-50"
+                            title={`Run VACUUM ANALYZE on ${t.schema}.${t.table}`}
+                          >
+                            {vacuuming === `${t.schema}.${t.table}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                            VACUUM
+                          </button>
                         </span>
+                      ) : noIndex ? (
+                        <span className="flex items-center gap-1 text-yellow-500"><AlertTriangle className="h-3 w-3" /> Low idx usage</span>
                       ) : (
                         <span className="flex items-center gap-1 text-green-500"><CheckCircle2 className="h-3 w-3" /> OK</span>
                       )}

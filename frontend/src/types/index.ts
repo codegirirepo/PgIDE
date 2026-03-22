@@ -197,7 +197,80 @@ export interface QueryBookmark {
   createdAt: number;
 }
 
+export interface FunctionParameter {
+  name: string;
+  data_type: string;
+  udt_name: string;
+  mode: string;
+  default_value: string | null;
+  position: number;
+}
+
+export interface FunctionDetails {
+  parameters: FunctionParameter[];
+  return_type: string;
+  volatility: string;
+  kind: string;
+}
+
 // ─── pgvector Types ───
+
+// ─── Plan Analysis Types (from pgplan) ───
+
+export type PlanFindingSeverity = 'critical' | 'warning' | 'info';
+
+export interface PlanFinding {
+  severity: PlanFindingSeverity;
+  nodeType: string;
+  relation: string;
+  description: string;
+  suggestion: string;
+}
+
+export interface PlanAnalysisResult {
+  findings: PlanFinding[];
+  totalCost: number;
+  executionTime: number;
+  planningTime: number;
+}
+
+// ─── Plan Comparison Types (from pgplan) ───
+
+export type ComparisonDirection = 'improved' | 'regressed' | 'unchanged';
+export type ComparisonChangeType = 'no_change' | 'modified' | 'added' | 'removed' | 'type_changed';
+
+export interface PlanNodeDelta {
+  nodeType: string;
+  relation: string;
+  changeType: ComparisonChangeType;
+  oldNodeType?: string;
+  newNodeType?: string;
+  oldCost: number; newCost: number; costDelta: number; costPct: number; costDir: ComparisonDirection;
+  oldTime: number; newTime: number; timeDelta: number; timePct: number; timeDir: ComparisonDirection;
+  oldRows: number; newRows: number; rowsDelta: number; rowsPct: number;
+  oldLoops: number; newLoops: number;
+  oldFilter: string; newFilter: string;
+  oldIndexName: string; newIndexName: string;
+  oldSortSpill: boolean; newSortSpill: boolean;
+  oldHashBatches: number; newHashBatches: number;
+  oldBufferReads: number; newBufferReads: number;
+  bufferDir: ComparisonDirection;
+  children: PlanNodeDelta[];
+}
+
+export interface PlanComparisonSummary {
+  oldTotalCost: number; newTotalCost: number; costDelta: number; costPct: number; costDir: ComparisonDirection;
+  oldExecutionTime: number; newExecutionTime: number; timeDelta: number; timePct: number; timeDir: ComparisonDirection;
+  nodesAdded: number; nodesRemoved: number; nodesModified: number; nodesTypeChanged: number;
+  verdict: string;
+}
+
+export interface PlanComparisonResult {
+  deltas: PlanNodeDelta[];
+  summary: PlanComparisonSummary;
+}
+
+// ─── pgvector Types (continued) ───
 
 export interface PgVectorStatus {
   installed: boolean;

@@ -15,14 +15,17 @@ import SlowQueries from '@/components/SlowQueries/SlowQueries';
 import ERDiagram from '@/components/ERDiagram/ERDiagram';
 import Bookmarks from '@/components/Bookmarks/Bookmarks';
 import PgVectorAdvisor from '@/components/PgVectorAdvisor/PgVectorAdvisor';
+import VisualQueryBuilder from '@/components/VisualQueryBuilder/VisualQueryBuilder';
+import DumpImport from '@/components/DumpImport/DumpImport';
+import KeyboardShortcuts from '@/components/KeyboardShortcuts/KeyboardShortcuts';
 import {
   Database, Sun, Moon, History, Plug, PanelLeftClose, PanelLeft,
-  Zap, Lightbulb, BarChart3, GitCompare, Gauge, Network, Bookmark, X, Boxes,
+  Zap, Lightbulb, BarChart3, GitCompare, Gauge, Network, Bookmark, X, Boxes, Workflow, HardDrive, Keyboard,
 } from 'lucide-react';
 
 type BottomPanel = 'results' | 'explain' | 'indexAdvisor';
 type SidePanel = 'explorer' | 'history' | 'bookmarks' | 'pgvector';
-type ModalPanel = 'tableStats' | 'schemaDiff' | 'slowQueries' | 'erDiagram' | null;
+type ModalPanel = 'tableStats' | 'schemaDiff' | 'slowQueries' | 'erDiagram' | 'queryBuilder' | 'dumpImport' | 'shortcuts' | null;
 
 export default function AppLayout() {
   const { theme, toggleTheme, connections, tabs, addTab, activeConnectionId } = useAppStore();
@@ -72,6 +75,9 @@ export default function AppLayout() {
           <ToolBtn icon={Gauge} label="Slow Queries" onClick={() => setModal(m => m === 'slowQueries' ? null : 'slowQueries')} active={modal === 'slowQueries'} />
           <ToolBtn icon={Network} label="ER Diagram" onClick={() => setModal(m => m === 'erDiagram' ? null : 'erDiagram')} active={modal === 'erDiagram'} />
           <ToolBtn icon={GitCompare} label="Schema Diff" onClick={() => setModal(m => m === 'schemaDiff' ? null : 'schemaDiff')} active={modal === 'schemaDiff'} />
+          <ToolBtn icon={Workflow} label="Query Builder" onClick={() => setModal(m => m === 'queryBuilder' ? null : 'queryBuilder')} active={modal === 'queryBuilder'} />
+          <ToolBtn icon={HardDrive} label="Dump/Import" onClick={() => setModal(m => m === 'dumpImport' ? null : 'dumpImport')} active={modal === 'dumpImport'} />
+          <ToolBtn icon={Keyboard} label="Shortcuts" onClick={() => setModal(m => m === 'shortcuts' ? null : 'shortcuts')} active={modal === 'shortcuts'} />
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">
@@ -100,6 +106,9 @@ export default function AppLayout() {
                 {modal === 'slowQueries' && 'Slow Queries'}
                 {modal === 'erDiagram' && 'ER Diagram'}
                 {modal === 'schemaDiff' && 'Schema Diff & Migration'}
+                {modal === 'queryBuilder' && 'Visual Query Builder'}
+                {modal === 'dumpImport' && 'SQL Dump & Import'}
+                {modal === 'shortcuts' && 'Keyboard Shortcuts'}
               </span>
               <button onClick={() => setModal(null)} className="rounded p-1 hover:bg-accent"><X className="h-4 w-4" /></button>
             </div>
@@ -108,6 +117,9 @@ export default function AppLayout() {
               {modal === 'slowQueries' && <SlowQueries />}
               {modal === 'erDiagram' && <ERDiagram />}
               {modal === 'schemaDiff' && <SchemaDiffViewer />}
+              {modal === 'queryBuilder' && <VisualQueryBuilder />}
+              {modal === 'dumpImport' && <DumpImport />}
+              {modal === 'shortcuts' && <KeyboardShortcuts />}
             </div>
           </div>
         ) : (
@@ -142,7 +154,7 @@ export default function AppLayout() {
             <Panel defaultSize={80}>
               <PanelGroup direction="vertical">
                 <Panel defaultSize={55} minSize={20}>
-                  <QueryEditor />
+                  <QueryEditor onOpenConnectionManager={() => setConnManagerOpen(true)} />
                 </Panel>
                 <PanelResizeHandle className="h-1 bg-border hover:bg-primary/50 transition-colors" />
                 <Panel defaultSize={45} minSize={15}>

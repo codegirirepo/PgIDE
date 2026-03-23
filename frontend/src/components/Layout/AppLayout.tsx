@@ -20,7 +20,7 @@ import DumpImport from '@/components/DumpImport/DumpImport';
 import KeyboardShortcuts from '@/components/KeyboardShortcuts/KeyboardShortcuts';
 import {
   Database, Sun, Moon, History, Plug, PanelLeftClose, PanelLeft,
-  Zap, Lightbulb, BarChart3, GitCompare, Gauge, Network, Bookmark, X, Boxes, Workflow, HardDrive, Keyboard,
+  BarChart3, GitCompare, Gauge, Network, Bookmark, X, Boxes, Workflow, HardDrive, Keyboard,
 } from 'lucide-react';
 
 type BottomPanel = 'results' | 'explain' | 'indexAdvisor';
@@ -67,9 +67,6 @@ export default function AppLayout() {
         {/* Feature buttons */}
         <div className="flex items-center gap-0.5 flex-1 justify-center">
           <ToolBtn icon={Plug} label="Connections" onClick={() => setConnManagerOpen(true)} />
-          <div className="w-px h-5 bg-border mx-1" />
-          <ToolBtn icon={Zap} label="EXPLAIN" onClick={() => setBottomPanel('explain')} active={bottomPanel === 'explain'} />
-          <ToolBtn icon={Lightbulb} label="Index Advisor" onClick={() => setBottomPanel('indexAdvisor')} active={bottomPanel === 'indexAdvisor'} />
           <div className="w-px h-5 bg-border mx-1" />
           <ToolBtn icon={BarChart3} label="Table Stats" onClick={() => setModal(m => m === 'tableStats' ? null : 'tableStats')} active={modal === 'tableStats'} />
           <ToolBtn icon={Gauge} label="Slow Queries" onClick={() => setModal(m => m === 'slowQueries' ? null : 'slowQueries')} active={modal === 'slowQueries'} />

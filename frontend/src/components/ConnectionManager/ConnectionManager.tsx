@@ -106,8 +106,17 @@ export default function ConnectionManager({ open, onClose }: { open: boolean; on
     try {
       const saved = await api.saveConnection(form);
       addConnection({ ...saved, connected: false });
+      // Auto-connect after save
+      try {
+        const res = await api.connect(saved.id);
+        if (res.success) {
+          setConnectionStatus(saved.id, true);
+          setActiveConnection(saved.id);
+        }
+      } catch {}
       setForm({ ...empty });
       setTestResult(null);
+      onClose();
     } catch (e: any) {
       setTestResult({ success: false, message: e.message });
     }
@@ -179,9 +188,11 @@ export default function ConnectionManager({ open, onClose }: { open: boolean; on
               <button onClick={handleTest} disabled={testing} className="flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm hover:bg-secondary/80">
                 {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <TestTube className="h-3.5 w-3.5" />} Test
               </button>
-              <button onClick={handleSave} disabled={saving || !form.name} className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Save
-              </button>
+              {testResult?.success && (
+                <button onClick={handleSave} disabled={saving || !form.name} className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Save & Connect
+                </button>
+              )}
             </div>
           </div>
         </div>

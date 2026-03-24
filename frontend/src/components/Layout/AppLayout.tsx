@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { useState, useEffect, useRef } from 'react';
+import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelHandle } from 'react-resizable-panels';
 import { useAppStore } from '@/store/useAppStore';
 import { api } from '@/services/api';
 import ConnectionManager from '@/components/ConnectionManager/ConnectionManager';
@@ -21,6 +21,7 @@ import KeyboardShortcuts from '@/components/KeyboardShortcuts/KeyboardShortcuts'
 import {
   Database, Sun, Moon, History, Plug, PanelLeftClose, PanelLeft,
   BarChart3, GitCompare, Gauge, Network, Bookmark, X, Boxes, Workflow, HardDrive, Keyboard,
+  Minimize2, Maximize2, ChevronsDownUp,
 } from 'lucide-react';
 
 type BottomPanel = 'results' | 'explain' | 'indexAdvisor';
@@ -34,6 +35,23 @@ export default function AppLayout() {
   const [sidePanel, setSidePanel] = useState<SidePanel>('explorer');
   const [bottomPanel, setBottomPanel] = useState<BottomPanel>('results');
   const [modal, setModal] = useState<ModalPanel>(null);
+  const resultsPanelRef = useRef<ImperativePanelHandle>(null);
+  const editorPanelRef = useRef<ImperativePanelHandle>(null);
+  const [resultsPanelState, setResultsPanelState] = useState<'normal' | 'minimized' | 'maximized'>('normal');
+
+  const minimizeResults = () => {
+    resultsPanelRef.current?.resize(5);
+    setResultsPanelState('minimized');
+  };
+  const maximizeResults = () => {
+    editorPanelRef.current?.resize(5);
+    setResultsPanelState('maximized');
+  };
+  const restoreResults = () => {
+    editorPanelRef.current?.resize(55);
+    resultsPanelRef.current?.resize(45);
+    setResultsPanelState('normal');
+  };
 
   useEffect(() => {
     api.getConnections().then(conns => {
@@ -150,11 +168,11 @@ export default function AppLayout() {
 
             <Panel defaultSize={80}>
               <PanelGroup direction="vertical">
-                <Panel defaultSize={55} minSize={20}>
+                <Panel ref={editorPanelRef} defaultSize={55} minSize={5}>
                   <QueryEditor onOpenConnectionManager={() => setConnManagerOpen(true)} />
                 </Panel>
-                <PanelResizeHandle className="h-1 bg-border hover:bg-primary/50 transition-colors" />
-                <Panel defaultSize={45} minSize={15}>
+                <PanelResizeHandle className="h-1 bg-border hover:bg-primary/50 transition-colors" onDragging={(isDragging) => { if (!isDragging) setResultsPanelState('normal'); }} />
+                <Panel ref={resultsPanelRef} defaultSize={45} minSize={5}>
                   <div className="flex flex-col h-full">
                     {/* Bottom panel tabs */}
                     <div className="flex border-b shrink-0 bg-card">
@@ -171,6 +189,23 @@ export default function AppLayout() {
                           {p.label}
                         </button>
                       ))}
+                      <div className="ml-auto flex items-center gap-0.5 pr-1">
+                        {resultsPanelState !== 'minimized' && (
+                          <button onClick={minimizeResults} className="rounded p-1 hover:bg-accent" title="Minimize results">
+                            <Minimize2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                        )}
+                        {resultsPanelState !== 'normal' && (
+                          <button onClick={restoreResults} className="rounded p-1 hover:bg-accent" title="Restore results">
+                            <ChevronsDownUp className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                        )}
+                        {resultsPanelState !== 'maximized' && (
+                          <button onClick={maximizeResults} className="rounded p-1 hover:bg-accent" title="Maximize results">
+                            <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="flex-1 min-h-0">
                       {bottomPanel === 'results' && <ResultsViewer />}

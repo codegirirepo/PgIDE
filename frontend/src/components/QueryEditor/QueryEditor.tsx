@@ -126,7 +126,7 @@ export default function QueryEditor({ onOpenConnectionManager }: { onOpenConnect
       id: 'execute-selected',
       label: 'Execute Selected',
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
-      run: () => executeCurrentQuery(true),
+      run: () => executeCurrentQuery(),
     });
 
     registerAutocomplete(monaco);
@@ -177,13 +177,13 @@ export default function QueryEditor({ onOpenConnectionManager }: { onOpenConnect
     return () => clearTimeout(timer);
   }, [activeTab?.sql]);
 
-  const executeCurrentQuery = useCallback(async (selectedOnly = false) => {
+  const executeCurrentQuery = useCallback(async () => {
     const state = useAppStore.getState();
     const tab = state.tabs.find(t => t.id === state.activeTabId);
     if (!tab || !tab.connectionId) return;
 
     let sql = tab.sql.trim();
-    if (selectedOnly && editorRef.current) {
+    if (editorRef.current) {
       const selection = editorRef.current.getModel()?.getValueInRange(editorRef.current.getSelection());
       if (selection?.trim()) sql = selection.trim();
     }

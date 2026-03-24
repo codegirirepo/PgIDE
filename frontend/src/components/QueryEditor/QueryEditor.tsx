@@ -4,7 +4,8 @@ import { api } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
 import { analyzeSQL } from '@/services/pgvector/pgvectorAnalyzer';
 import type { AutocompleteData } from '@/types';
-import { Play, Plus, X, Square, Loader2, ChevronDown, Plug, Database } from 'lucide-react';
+import { format } from 'sql-formatter';
+import { Play, Plus, X, Square, Loader2, ChevronDown, Plug, Database, AlignLeft } from 'lucide-react';
 import { useShortcutStore } from '@/store/useShortcutStore';
 
 let autocompleteCache: Record<string, AutocompleteData> = {};
@@ -129,6 +130,13 @@ export default function QueryEditor({ onOpenConnectionManager }: { onOpenConnect
       run: () => executeCurrentQuery(),
     });
 
+    editor.addAction({
+      id: 'format-sql',
+      label: 'Format SQL',
+      keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+      run: () => formatSQL(),
+    });
+
     registerAutocomplete(monaco);
   };
 
@@ -245,6 +253,25 @@ export default function QueryEditor({ onOpenConnectionManager }: { onOpenConnect
     }
   }, [updateTab, addHistory]);
 
+  const formatSQL = useCallback(() => {
+    if (!editorRef.current || !activeTabId) return;
+    const editor = editorRef.current;
+    const selection = editor.getSelection();
+    const selectedText = editor.getModel()?.getValueInRange(selection);
+
+    try {
+      if (selectedText?.trim()) {
+        const formatted = format(selectedText, { language: 'postgresql', tabWidth: 2, keywordCase: 'upper' });
+        editor.executeEdits('format', [{ range: selection, text: formatted }]);
+      } else {
+        const fullText = editor.getValue();
+        if (!fullText.trim()) return;
+        const formatted = format(fullText, { language: 'postgresql', tabWidth: 2, keywordCase: 'upper' });
+        updateTab(activeTabId, { sql: formatted });
+      }
+    } catch { /* ignore parse errors */ }
+  }, [activeTabId, updateTab]);
+
   const connName = activeTab?.connectionId
     ? connections.find(c => c.id === activeTab.connectionId)?.name || 'Unknown'
     : 'No connection';
@@ -357,7 +384,14 @@ export default function QueryEditor({ onOpenConnectionManager }: { onOpenConnect
               </div>
             )}
           </div>
-          <span className="text-xs text-muted-foreground ml-auto">{useShortcutStore.getState().getKeys('executeQuery')} to execute | {useShortcutStore.getState().getKeys('executeSelection')} for selection</span>
+          <button
+            onClick={formatSQL}
+            className="flex items-center gap-1 rounded px-2.5 py-1 text-xs hover:bg-accent text-muted-foreground"
+            title="Format SQL (Shift+Alt+F)"
+          >
+            <AlignLeft className="h-3 w-3" /> Format
+          </button>
+          <span className="text-xs text-muted-foreground ml-auto">{useShortcutStore.getState().getKeys('executeQuery')} to execute | Shift+Alt+F to format</span>
         </div>
       )}
 

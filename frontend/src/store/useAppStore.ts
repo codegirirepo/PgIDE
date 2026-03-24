@@ -17,6 +17,7 @@ interface AppState {
   removeConnection: (id: string) => void;
   setActiveConnection: (id: string | null) => void;
   setConnectionStatus: (id: string, connected: boolean) => void;
+  getEffectiveConnectionId: () => string | null;
 
   // Explorer tree
   treeNodes: TreeNode[];
@@ -60,6 +61,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     activeConnectionId: s.activeConnectionId === id ? null : s.activeConnectionId,
   })),
   setActiveConnection: (id) => set({ activeConnectionId: id }),
+  getEffectiveConnectionId: () => {
+    const s = get();
+    // 1. Global active connection if it's actually connected
+    if (s.activeConnectionId && s.connections.find(c => c.id === s.activeConnectionId && c.connected)) return s.activeConnectionId;
+    // 2. Active tab's connection if connected
+    const tab = s.tabs.find(t => t.id === s.activeTabId);
+    if (tab?.connectionId && s.connections.find(c => c.id === tab.connectionId && c.connected)) return tab.connectionId;
+    // 3. Any connected connection
+    const any = s.connections.find(c => c.connected);
+    return any?.id || s.activeConnectionId;
+  },
   setConnectionStatus: (id, connected) => set(s => ({
     connections: s.connections.map(c => c.id === id ? { ...c, connected } : c),
   })),

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/services/api';
-import { useAppStore } from '@/store/useAppStore';
 import type { TableStat } from '@/types';
 import { BarChart3, RefreshCw, Loader2, AlertTriangle, CheckCircle2, Sparkles } from 'lucide-react';
+import ConnectionPicker from '@/components/shared/ConnectionPicker';
+import { useConnectionId } from '@/hooks/useConnectionId';
 
 function formatSize(bytes: number) {
   if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
@@ -21,7 +22,7 @@ function timeAgo(ts: string | null) {
 }
 
 export default function TableStats() {
-  const connId = useAppStore(s => s.activeConnectionId);
+  const [connId, setConnId] = useConnectionId();
   const [stats, setStats] = useState<{ tables: TableStat[]; cacheHitRatio: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'dead_rows', dir: 'desc' });
@@ -52,6 +53,7 @@ export default function TableStats() {
       <div className="flex items-center gap-2 border-b px-3 py-2 shrink-0">
         <BarChart3 className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">Table Stats Dashboard</span>
+        <ConnectionPicker value={connId} onChange={setConnId} />
         {stats && <span className={`text-xs ml-2 font-bold ${cacheColor}`}>Cache Hit: {stats.cacheHitRatio}%</span>}
         <button onClick={load} disabled={loading} className="ml-auto rounded p-1 hover:bg-accent">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}

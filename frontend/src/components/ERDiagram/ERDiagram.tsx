@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '@/services/api';
-import { useAppStore } from '@/store/useAppStore';
 import type { ERTable, ERRelationship } from '@/types';
 import { Network, RefreshCw, Loader2, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import ConnectionPicker from '@/components/shared/ConnectionPicker';
+import { useConnectionId } from '@/hooks/useConnectionId';
 
 const TABLE_W = 200;
 const COL_H = 18;
@@ -10,7 +11,7 @@ const HEADER_H = 28;
 const PAD = 40;
 
 export default function ERDiagram() {
-  const connId = useAppStore(s => s.activeConnectionId);
+  const [connId, setConnId] = useConnectionId();
   const [tables, setTables] = useState<ERTable[]>([]);
   const [rels, setRels] = useState<ERRelationship[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,6 +85,7 @@ export default function ERDiagram() {
       <div className="flex items-center gap-2 border-b px-3 py-2 shrink-0 flex-wrap">
         <Network className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">ER Diagram</span>
+        <ConnectionPicker value={connId} onChange={setConnId} />
         <select value={schema} onChange={e => setSchema(e.target.value)} className="h-7 rounded border bg-background px-2 text-xs">
           {schemas.map(s => <option key={s} value={s}>{s}</option>)}
         </select>

@@ -3,9 +3,11 @@ import { api } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
 import type { SlowQuery } from '@/types';
 import { Gauge, RefreshCw, Loader2, Play, AlertCircle } from 'lucide-react';
+import ConnectionPicker from '@/components/shared/ConnectionPicker';
+import { useConnectionId } from '@/hooks/useConnectionId';
 
 export default function SlowQueries() {
-  const connId = useAppStore(s => s.activeConnectionId);
+  const [connId, setConnId] = useConnectionId();
   const updateTab = useAppStore(s => s.updateTab);
   const activeTabId = useAppStore(s => s.activeTabId);
   const [data, setData] = useState<{ available: boolean; queries: SlowQuery[]; message?: string } | null>(null);
@@ -28,6 +30,7 @@ export default function SlowQueries() {
       <div className="flex items-center gap-2 border-b px-3 py-2 shrink-0">
         <Gauge className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">Slow Queries (pg_stat_statements)</span>
+        <ConnectionPicker value={connId} onChange={setConnId} />
         <button onClick={load} disabled={loading} className="ml-auto rounded p-1 hover:bg-accent">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         </button>

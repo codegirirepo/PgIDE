@@ -390,3 +390,374 @@ export async function getPrimaryKeyColumns(connectionId: string, schema: string,
   `, [schema, table]);
   return res.rows.map(r => r.column_name);
 }
+
+// ─── 10. ACTIVE SESSIONS (pg_stat_activity) ───
+export async function getActiveSessions(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+  const res = await pool.query(`
+    SELECT
+      pid,
+      usename AS username,
+      datname AS database,
+      client_addr,
+      application_name,
+      state,
+      wait_event_type,
+      wait_event,
+      query,
+      backend_start,
+      xact_start,
+      query_start,
+      state_change,
+      CASE WHEN state = 'active' AND query_start IS NOT NULL
+        THEN extract(epoch FROM now() - query_start)::numeric(10,1)
+        ELSE NULL END AS query_duration_sec,
+      backend_type
+    FROM pg_stat_activity
+    WHERE pid <> pg_backend_pid()
+    ORDER BY query_start DESC NULLS LAST
+  `);
+  return res.rows;
+}
+
+export async function terminateSession(connectionId: string, pid: number, mode: 'cancel' | 'terminate') {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+  const fn = mode === 'terminate' ? 'pg_terminate_backend' : 'pg_cancel_backend';
+  const res = await pool.query(`SELECT ${fn}($1) AS result`, [pid]);
+  return { success: res.rows[0]?.result ?? false };
+}
+
+// ─── 11. LOCK MONITOR (pg_locks) ───
+export async function getLocks(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+  const res = await pool.query(`
+    SELECT
+      l.pid,
+      a.usename AS username,
+      a.datname AS database,
+      l.locktype,
+      l.mode,
+      l.granted,
+      COALESCE(l.relation::regclass::text, '') AS relation,
+      a.state,
+      a.query,
+      a.query_start,
+      CASE WHEN a.state = 'active' AND a.query_start IS NOT NULL
+        THEN extract(epoch FROM now() - a.query_start)::numeric(10,1)
+        ELSE NULL END AS duration_sec,
+      l.waitstart
+    FROM pg_locks l
+    JOIN pg_stat_activity a ON l.pid = a.pid
+    WHERE a.pid <> pg_backend_pid()
+    ORDER BY l.granted ASC, a.query_start DESC NULLS LAST
+  `);
+
+  // Blocking chains
+  const blockingRes = await pool.query(`
+    SELECT
+      blocked.pid AS blocked_pid,
+      blocked.query AS blocked_query,
+      blocked.usename AS blocked_user,
+      blocking.pid AS blocking_pid,
+      blocking.query AS blocking_query,
+      blocking.usename AS blocking_user
+    FROM pg_stat_activity blocked
+    JOIN pg_locks bl ON bl.pid = blocked.pid AND NOT bl.granted
+    JOIN pg_locks kl ON kl.transactionid = bl.transactionid AND kl.granted
+    JOIN pg_stat_activity blocking ON kl.pid = blocking.pid
+    WHERE blocked.pid <> blocking.pid
+  `);
+
+  return { locks: res.rows, blockingChains: blockingRes.rows };
+}
+
+// ─── 12. REPLICATION MONITOR ───
+export async function getReplicationStatus(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  const repRes = await pool.query(`
+    SELECT
+      pid,
+      usesysid,
+      usename,
+      application_name,
+      client_addr,
+      state,
+      sent_lsn,
+      write_lsn,
+      flush_lsn,
+      replay_lsn,
+      sync_state,
+      sync_priority,
+      reply_time
+    FROM pg_stat_replication
+    ORDER BY application_name
+  `);
+
+  const slotRes = await pool.query(`
+    SELECT
+      slot_name,
+      plugin,
+      slot_type,
+      active,
+      restart_lsn,
+      confirmed_flush_lsn,
+      wal_status
+    FROM pg_replication_slots
+    ORDER BY slot_name
+  `);
+
+  const isReplica = await pool.query(`SELECT pg_is_in_recovery() AS is_replica`);
+
+  return {
+    replicas: repRes.rows,
+    slots: slotRes.rows,
+    isReplica: isReplica.rows[0]?.is_replica ?? false,
+  };
+}
+
+// ─── 13. DATABASE SIZE & DISK USAGE ───
+export async function getDiskUsage(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  const dbSize = await pool.query(`
+    SELECT
+      datname AS name,
+      pg_database_size(datname) AS size_bytes
+    FROM pg_database
+    WHERE datistemplate = false
+    ORDER BY pg_database_size(datname) DESC
+  `);
+
+  const schemaSize = await pool.query(`
+    SELECT
+      schemaname AS schema,
+      count(*) AS table_count,
+      sum(pg_total_relation_size(quote_ident(schemaname)||'.'||quote_ident(tablename))) AS size_bytes
+    FROM pg_tables
+    WHERE schemaname NOT IN ('pg_catalog','information_schema','pg_toast')
+    GROUP BY schemaname
+    ORDER BY size_bytes DESC
+  `);
+
+  const topTables = await pool.query(`
+    SELECT
+      n.nspname AS schema,
+      c.relname AS table,
+      pg_total_relation_size(c.oid) AS total_bytes,
+      pg_relation_size(c.oid) AS table_bytes,
+      pg_indexes_size(c.oid) AS index_bytes,
+      pg_total_relation_size(c.oid) - pg_relation_size(c.oid) - pg_indexes_size(c.oid) AS toast_bytes
+    FROM pg_class c
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE c.relkind = 'r'
+      AND n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
+    ORDER BY pg_total_relation_size(c.oid) DESC
+    LIMIT 50
+  `);
+
+  return { databases: dbSize.rows, schemas: schemaSize.rows, topTables: topTables.rows };
+}
+
+// ─── 14. ROLE & PERMISSION MANAGER ───
+export async function getRoles(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  // Try full query with member_of first; fall back to simpler query if pg_auth_members is restricted
+  try {
+    const roles = await pool.query(`
+      SELECT
+        r.rolname AS name,
+        r.rolsuper AS is_superuser,
+        r.rolcreatedb AS can_create_db,
+        r.rolcreaterole AS can_create_role,
+        r.rolcanlogin AS can_login,
+        r.rolreplication AS is_replication,
+        r.rolconnlimit AS conn_limit,
+        r.rolvaliduntil AS valid_until,
+        ARRAY(SELECT b.rolname FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles b ON m.roleid = b.oid WHERE m.member = r.oid) AS member_of
+      FROM pg_catalog.pg_roles r
+      ORDER BY r.rolname
+    `);
+    return roles.rows;
+  } catch {
+    // Fallback: skip member_of if pg_auth_members is not accessible
+    const roles = await pool.query(`
+      SELECT
+        r.rolname AS name,
+        r.rolsuper AS is_superuser,
+        r.rolcreatedb AS can_create_db,
+        r.rolcreaterole AS can_create_role,
+        r.rolcanlogin AS can_login,
+        r.rolreplication AS is_replication,
+        r.rolconnlimit AS conn_limit,
+        r.rolvaliduntil AS valid_until,
+        ARRAY[]::text[] AS member_of
+      FROM pg_catalog.pg_roles r
+      ORDER BY r.rolname
+    `);
+    return roles.rows;
+  }
+}
+
+export async function getTableGrants(connectionId: string, schema: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  const res = await pool.query(`
+    SELECT
+      grantee,
+      table_schema AS schema,
+      table_name AS table,
+      privilege_type,
+      is_grantable
+    FROM information_schema.table_privileges
+    WHERE table_schema = $1
+    ORDER BY table_name, grantee, privilege_type
+  `, [schema]);
+
+  return res.rows;
+}
+
+// ─── 15. SERVER CONFIGURATION (pg_settings) ───
+export async function getServerConfig(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  const res = await pool.query(`
+    SELECT
+      name,
+      setting,
+      unit,
+      category,
+      short_desc AS description,
+      context,
+      vartype AS type,
+      source,
+      boot_val AS default_value,
+      min_val,
+      max_val,
+      enumvals
+    FROM pg_settings
+    ORDER BY category, name
+  `);
+
+  return res.rows;
+}
+
+// ─── 16. EXTENSION MANAGER ───
+export async function getExtensions(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  const installed = await pool.query(`
+    SELECT extname AS name, extversion AS version, extnamespace::regnamespace::text AS schema
+    FROM pg_extension
+    ORDER BY extname
+  `);
+
+  const available = await pool.query(`
+    SELECT name, default_version, comment
+    FROM pg_available_extensions
+    WHERE installed_version IS NULL
+    ORDER BY name
+  `);
+
+  return { installed: installed.rows, available: available.rows };
+}
+
+export async function manageExtension(connectionId: string, name: string, action: 'install' | 'drop') {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+  const safeName = name.replace(/[^a-zA-Z0-9_]/g, '');
+  if (action === 'install') {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS "${safeName}"`);
+  } else {
+    await pool.query(`DROP EXTENSION IF EXISTS "${safeName}" CASCADE`);
+  }
+  return { success: true };
+}
+
+// ─── 17. TRIGGER & RULE INSPECTOR ───
+export async function getTriggers(connectionId: string, schema: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  const res = await pool.query(`
+    SELECT
+      t.tgname AS name,
+      c.relname AS table,
+      CASE t.tgtype::int & 66
+        WHEN 2 THEN 'BEFORE'
+        WHEN 64 THEN 'INSTEAD OF'
+        ELSE 'AFTER'
+      END AS timing,
+      ARRAY_REMOVE(ARRAY[
+        CASE WHEN t.tgtype::int & 4 > 0 THEN 'INSERT' END,
+        CASE WHEN t.tgtype::int & 8 > 0 THEN 'DELETE' END,
+        CASE WHEN t.tgtype::int & 16 > 0 THEN 'UPDATE' END,
+        CASE WHEN t.tgtype::int & 32 > 0 THEN 'TRUNCATE' END
+      ], NULL) AS events,
+      p.proname AS function_name,
+      t.tgenabled AS enabled,
+      pg_get_triggerdef(t.oid) AS definition
+    FROM pg_trigger t
+    JOIN pg_class c ON t.tgrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    JOIN pg_proc p ON t.tgfoid = p.oid
+    WHERE n.nspname = $1 AND NOT t.tgisinternal
+    ORDER BY c.relname, t.tgname
+  `, [schema]);
+
+  const rules = await pool.query(`
+    SELECT
+      rulename AS name,
+      tablename AS table,
+      definition
+    FROM pg_rules
+    WHERE schemaname = $1
+    ORDER BY tablename, rulename
+  `, [schema]);
+
+  return { triggers: res.rows, rules: rules.rows };
+}
+
+// ─── 18. MAINTENANCE (REINDEX, CLUSTER, ANALYZE) ───
+export async function runMaintenance(connectionId: string, action: 'reindex' | 'cluster' | 'analyze', schema: string, table: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+  const esc = (s: string) => s.replace(/"/g, '""');
+  const target = `"${esc(schema)}"."${esc(table)}"`;
+  let sql: string;
+  switch (action) {
+    case 'reindex': sql = `REINDEX TABLE ${target}`; break;
+    case 'cluster': sql = `CLUSTER ${target}`; break;
+    case 'analyze': sql = `ANALYZE ${target}`; break;
+  }
+  await pool.query(sql);
+  return { success: true, message: `${action.toUpperCase()} completed on ${target}` };
+}
+
+// ─── 19. TABLESPACE MANAGER ───
+export async function getTablespaces(connectionId: string) {
+  const pool = getPool(connectionId);
+  if (!pool) throw new Error('Not connected');
+
+  const res = await pool.query(`
+    SELECT
+      spcname AS name,
+      pg_tablespace_location(oid) AS location,
+      pg_tablespace_size(oid) AS size_bytes,
+      spcowner::regrole::text AS owner
+    FROM pg_tablespace
+    ORDER BY spcname
+  `);
+
+  return res.rows;
+}

@@ -94,6 +94,42 @@ export const api = {
   vacuumTable: (connectionId: string, schema: string, table: string) =>
     request<{ success: boolean; message: string }>('/advanced/vacuum', { method: 'POST', body: JSON.stringify({ connectionId, schema, table }) }),
 
+  // Active Sessions
+  getActiveSessions: (connId: string) => request<any[]>(`/advanced/sessions/${connId}`),
+  terminateSession: (connectionId: string, pid: number, mode: 'cancel' | 'terminate') =>
+    request<{ success: boolean }>('/advanced/sessions/terminate', { method: 'POST', body: JSON.stringify({ connectionId, pid, mode }) }),
+
+  // Lock Monitor
+  getLocks: (connId: string) => request<{ locks: any[]; blockingChains: any[] }>(`/advanced/locks/${connId}`),
+
+  // Replication
+  getReplicationStatus: (connId: string) => request<{ replicas: any[]; slots: any[]; isReplica: boolean }>(`/advanced/replication/${connId}`),
+
+  // Disk Usage
+  getDiskUsage: (connId: string) => request<{ databases: any[]; schemas: any[]; topTables: any[] }>(`/advanced/disk-usage/${connId}`),
+
+  // Roles & Permissions
+  getRoles: (connId: string) => request<any[]>(`/advanced/roles/${connId}`),
+  getTableGrants: (connId: string, schema: string) => request<any[]>(`/advanced/grants/${connId}/${schema}`),
+
+  // Server Config
+  getServerConfig: (connId: string) => request<any[]>(`/advanced/server-config/${connId}`),
+
+  // Extensions
+  getExtensions: (connId: string) => request<{ installed: any[]; available: any[] }>(`/advanced/extensions/${connId}`),
+  manageExtension: (connectionId: string, name: string, action: 'install' | 'drop') =>
+    request<{ success: boolean }>('/advanced/extensions/manage', { method: 'POST', body: JSON.stringify({ connectionId, name, action }) }),
+
+  // Triggers & Rules
+  getTriggers: (connId: string, schema: string) => request<{ triggers: any[]; rules: any[] }>(`/advanced/triggers/${connId}/${schema}`),
+
+  // Maintenance
+  runMaintenance: (connectionId: string, action: string, schema: string, table: string) =>
+    request<{ success: boolean; message: string }>('/advanced/maintenance', { method: 'POST', body: JSON.stringify({ connectionId, action, schema, table }) }),
+
+  // Tablespaces
+  getTablespaces: (connId: string) => request<any[]>(`/advanced/tablespaces/${connId}`),
+
   // Dump & Import
   getDumpSchemas: (connId: string) => request<string[]>(`/dump/schemas/${connId}`),
   exportDatabase: async (connectionId: string, options: { schemaOnly?: boolean; dataOnly?: boolean; tables?: string[]; schema?: string } = {}) => {

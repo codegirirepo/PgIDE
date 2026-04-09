@@ -132,7 +132,7 @@ function splitStatements(sql: string): string[] {
 
 function detectQueryType(sql: string): 'SELECT' | 'MODIFY' | 'OTHER' {
   const trimmed = sql.trim().toUpperCase();
-  if (trimmed.startsWith('SELECT') || trimmed.startsWith('WITH') || trimmed.startsWith('EXPLAIN')) return 'SELECT';
+  if (trimmed.startsWith('SELECT') || trimmed.startsWith('WITH') || trimmed.startsWith('EXPLAIN') || trimmed.startsWith('FETCH') || trimmed.startsWith('TABLE')) return 'SELECT';
   if (trimmed.startsWith('INSERT') || trimmed.startsWith('UPDATE') || trimmed.startsWith('DELETE')) return 'MODIFY';
   return 'OTHER';
 }
@@ -148,20 +148,51 @@ function hasLimitClause(sql: string): boolean {
   return /\bLIMIT\b/i.test(stripped);
 }
 
-async function executeSingle(client: any, sql: string, req: QueryRequest): Promise<QueryResult> {
+const REFCURSOR_OID = 1790;
+
+function isFetchCursor(sql: string): boolean {
+  return /^\s*FETCH\b/i.test(sql);
+}
+
+function isRefcursorResult(result: any): string[] {
+  if (!result.fields || !result.rows?.length) return [];
+  const cursors: string[] = [];
+  for (const field of result.fields) {
+    if (field.dataTypeID === REFCURSOR_OID) {
+      for (const row of result.rows) {
+        const val = row[field.name];
+        if (typeof val === 'string' && val) cursors.push(val);
+      }
+    }
+  }
+  return cursors;
+}
+
+async function executeSingle(client: any, sql: string, req: QueryRequest, inTransaction: boolean): Promise<QueryResult[]> {
   const start = Date.now();
   try {
     const queryType = detectQueryType(sql);
     const cleanSql = stripTrailingSemicolon(sql);
 
-    if (queryType === 'SELECT' && req.limit && !hasLimitClause(cleanSql)) {
-      // Fetch limit+1 rows to detect if more rows exist, without expensive COUNT(*)
+    // FETCH cursor statements have their own row-count syntax — never append LIMIT/OFFSET
+    if (queryType === 'SELECT' && req.limit && !hasLimitClause(cleanSql) && !isFetchCursor(cleanSql)) {
       const fetchLimit = req.limit + 1;
       const paginatedSql = `${cleanSql} LIMIT ${fetchLimit} OFFSET ${req.offset || 0}`;
       const result = await client.query(paginatedSql);
+
+      // Auto-fetch refcursors returned by the query
+      const cursors = isRefcursorResult(result);
+      if (cursors.length > 0) {
+        if (!inTransaction) {
+          // Not in a transaction — cursors are already dead. Re-run inside a transaction.
+          return await rerunWithTransaction(client, cleanSql, start);
+        }
+        return await autoFetchCursors(client, result, cursors, start, false);
+      }
+
       const hasMore = result.rows.length > req.limit;
       const rows = hasMore ? result.rows.slice(0, req.limit) : result.rows;
-      return {
+      return [{
         queryId: '',
         columns: result.fields.map((f: any) => ({ name: f.name, dataType: getDataTypeName(f.dataTypeID) })),
         rows,
@@ -169,20 +200,30 @@ async function executeSingle(client: any, sql: string, req: QueryRequest): Promi
         hasMore,
         command: result.command,
         duration: Date.now() - start,
-      };
+      }];
     }
 
     const result = await client.query(cleanSql);
-    return {
+
+    // Auto-fetch refcursors
+    const cursors = isRefcursorResult(result);
+    if (cursors.length > 0) {
+      if (!inTransaction) {
+        return await rerunWithTransaction(client, cleanSql, start);
+      }
+      return await autoFetchCursors(client, result, cursors, start, false);
+    }
+
+    return [{
       queryId: '',
       columns: result.fields?.map((f: any) => ({ name: f.name, dataType: getDataTypeName(f.dataTypeID) })) || [],
       rows: result.rows || [],
       rowCount: result.rowCount || 0,
       command: result.command,
       duration: Date.now() - start,
-    };
+    }];
   } catch (err: any) {
-    return {
+    return [{
       queryId: '',
       columns: [],
       rows: [],
@@ -190,7 +231,95 @@ async function executeSingle(client: any, sql: string, req: QueryRequest): Promi
       command: '',
       duration: Date.now() - start,
       error: err.message,
-    };
+    }];
+  }
+}
+
+async function autoFetchCursors(client: any, originalResult: any, cursors: string[], start: number, needsTransaction: boolean): Promise<QueryResult[]> {
+  const results: QueryResult[] = [];
+  let beganTx = false;
+
+  // First result: the original output showing refcursor names
+  results.push({
+    queryId: '',
+    columns: originalResult.fields?.map((f: any) => ({ name: f.name, dataType: getDataTypeName(f.dataTypeID) })) || [],
+    rows: originalResult.rows || [],
+    rowCount: originalResult.rowCount || 0,
+    command: originalResult.command,
+    duration: Date.now() - start,
+  });
+
+  // Refcursors require an active transaction — if we're not already in one, start one
+  if (needsTransaction) {
+    try {
+      await client.query('BEGIN');
+      beganTx = true;
+    } catch { /* already in a transaction, that's fine */ }
+  }
+
+  // Subsequent results: fetched data from each cursor
+  for (const cursor of cursors) {
+    try {
+      const fetchRes = await client.query(`FETCH ALL FROM "${cursor.replace(/"/g, '""')}"`);
+      results.push({
+        queryId: '',
+        columns: fetchRes.fields?.map((f: any) => ({ name: f.name, dataType: getDataTypeName(f.dataTypeID) })) || [],
+        rows: fetchRes.rows || [],
+        rowCount: fetchRes.rows?.length || 0,
+        command: `FETCH ALL FROM "${cursor}"`,
+        duration: Date.now() - start,
+      });
+    } catch {
+      results.push({
+        queryId: '',
+        columns: [{ name: 'refcursor', dataType: 'refcursor' }],
+        rows: [{ refcursor: cursor }],
+        rowCount: 1,
+        command: originalResult.command,
+        duration: Date.now() - start,
+        error: `Could not auto-fetch cursor "${cursor}". Use BEGIN before calling the function, then FETCH ALL FROM "${cursor}".`,
+      });
+    }
+  }
+
+  if (beganTx) {
+    try { await client.query('COMMIT'); } catch { /* ignore */ }
+  }
+
+  return results;
+}
+
+async function rerunWithTransaction(client: any, sql: string, start: number): Promise<QueryResult[]> {
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(sql);
+    const cursors = isRefcursorResult(result);
+    if (cursors.length > 0) {
+      // autoFetchCursors already prepends the original refcursor result
+      const fetched = await autoFetchCursors(client, result, cursors, start, false);
+      await client.query('COMMIT');
+      return fetched;
+    }
+    await client.query('COMMIT');
+    return [{
+      queryId: '',
+      columns: result.fields?.map((f: any) => ({ name: f.name, dataType: getDataTypeName(f.dataTypeID) })) || [],
+      rows: result.rows || [],
+      rowCount: result.rowCount || 0,
+      command: result.command,
+      duration: Date.now() - start,
+    }];
+  } catch (err: any) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    return [{
+      queryId: '',
+      columns: [],
+      rows: [],
+      rowCount: 0,
+      command: '',
+      duration: Date.now() - start,
+      error: err.message,
+    }];
   }
 }
 
@@ -210,13 +339,21 @@ export async function executeQuery(req: QueryRequest): Promise<BatchResult> {
 
     const statements = splitStatements(req.sql);
     const results: QueryResult[] = [];
+    let inTransaction = false;
 
     for (const stmt of statements) {
-      const result = await executeSingle(client, stmt, req);
-      result.queryId = queryId;
-      results.push(result);
-      // Stop on first error
-      if (result.error) break;
+      const upper = stmt.trim().toUpperCase();
+      if (upper === 'BEGIN' || upper.startsWith('BEGIN ') || upper.startsWith('START TRANSACTION')) inTransaction = true;
+
+      const stmtResults = await executeSingle(client, stmt, req, inTransaction);
+      for (const result of stmtResults) {
+        result.queryId = queryId;
+        results.push(result);
+        if (result.error) break;
+      }
+      if (results.some(r => r.error)) break;
+
+      if (upper === 'COMMIT' || upper === 'END' || upper === 'ROLLBACK') inTransaction = false;
     }
 
     return {
@@ -250,6 +387,7 @@ const OID_MAP: Record<number, string> = {
   1082: 'date', 1083: 'time', 1114: 'timestamp', 1184: 'timestamptz',
   1700: 'numeric', 2950: 'uuid', 3802: 'jsonb', 114: 'json', 1009: 'text[]',
   1007: 'integer[]', 1016: 'bigint[]', 1015: 'varchar[]',
+  1790: 'refcursor',
 };
 
 function getDataTypeName(oid: number): string {
